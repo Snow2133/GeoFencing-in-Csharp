@@ -1,0 +1,165 @@
+using System.Collections;
+using UnityEngine;
+using UnityEngine.Networking;
+using UnityEngine.UI;
+
+#if UNITY_ANDROID
+using UnityEngine.Android;
+#endif
+
+[System.Serializable]
+public class Components
+{
+    public string state;
+}
+
+[System.Serializable]
+public class Result
+{
+    public Components components;
+}
+
+[System.Serializable]
+public class GeoResponse
+{
+    public Result[] results;
+}
+
+public class GeoFencing : MonoBehaviour
+{
+    [Header("OpenCage API Key")]
+    public string opencageApiKey = "YOUR OPENCAGE API KEY";
+
+    [Header("Banned Indian States")]
+    public string[] bannedStates = {
+        "Tamil Nadu", "Andhra Pradesh", "Telangana",
+        "Karnataka", "Odisha", "Assam", "Sikkim", "Nagaland"
+    };
+
+    [Header("UI Elements")]
+    public GameObject statusPanel;   // Unified panel for messages
+    public Text statusText;          // Message text inside the panel
+
+    void Start()
+    {
+        if (statusPanel != null) statusPanel.SetActive(false);
+        if (statusText != null) statusText.text = "";
+
+#if UNITY_ANDROID
+        if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+        {
+            Permission.RequestUserPermission(Permission.FineLocation);
+            Debug.Log("📢 Requesting location permission...");
+            return;
+        }
+#endif
+
+        StartCoroutine(CheckGeoAccess());
+    }
+
+    public void RetryPermission()
+    {
+#if UNITY_ANDROID
+        if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+        {
+            Permission.RequestUserPermission(Permission.FineLocation);
+            Debug.Log("🔁 Retrying permission request...");
+            return;
+        }
+#endif
+        if (statusPanel != null) statusPanel.SetActive(false);
+        StartCoroutine(CheckGeoAccess());
+    }
+
+    IEnumerator CheckGeoAccess()
+    {
+        Debug.Log("📍 Starting GPS-based geofencing...");
+
+        if (!Input.location.isEnabledByUser)
+        {
+            ShowStatus("Location services are disabled on your device.");
+            yield break;
+        }
+
+        Input.location.Start();
+        Debug.Log("⏳ Waiting for GPS...");
+
+        int maxWait = 20;
+        while (Input.location.status == LocationServiceStatus.Initializing && maxWait > 0)
+        {
+            yield return new WaitForSeconds(1);
+            maxWait--;
+        }
+
+        if (Input.location.status != LocationServiceStatus.Running)
+        {
+            ShowStatus("Unable to access GPS location.");
+            yield break;
+        }
+
+        float lat = Input.location.lastData.latitude;
+        float lon = Input.location.lastData.longitude;
+        Debug.Log($"✅ Location acquired: {lat}, {lon}");
+
+        Input.location.Stop();
+        yield return StartCoroutine(CheckState(lat, lon));
+    }
+
+    IEnumerator CheckState(float lat, float lon)
+    {
+        string url = $"https://api.opencagedata.com/geocode/v1/json?q={lat}+{lon}&key={opencageApiKey}";
+        UnityWebRequest request = UnityWebRequest.Get(url);
+        Debug.Log("🌐 Fetching state from OpenCage...");
+
+        yield return request.SendWebRequest();
+
+#if UNITY_2020_1_OR_NEWER
+        if (request.result != UnityWebRequest.Result.Success)
+#else
+        if (request.isNetworkError || request.isHttpError)
+#endif
+        {
+            ShowStatus("Failed to get location information.");
+            yield break;
+        }
+
+        string json = request.downloadHandler.text;
+        GeoResponse geo = JsonUtility.FromJson<GeoResponse>(json);
+
+        if (geo.results == null || geo.results.Length == 0 || geo.results[0].components == null)
+        {
+            ShowStatus("Unable to determine your location.");
+            yield break;
+        }
+
+        string userState = geo.results[0].components.state;
+        Debug.Log("📍 You are in: " + userState);
+
+        foreach (string banned in bannedStates)
+        {
+            if (userState.Equals(banned, System.StringComparison.OrdinalIgnoreCase))
+            {
+                ShowStatus($"⛔ Access Denied: 52 Cards is restricted in {userState} due to legal guidelines.");
+                yield break;
+            }
+        }
+
+        Debug.Log($"✅ Access Granted. You are in {userState}");
+    }
+
+    void ShowStatus(string message)
+    {
+        Debug.Log("ℹ️ Status: " + message);
+        if (statusPanel != null) statusPanel.SetActive(true);
+        if (statusText != null) statusText.text = message;
+    }
+    public void QuitGame()
+{
+    Debug.Log("🚪 Quitting the game...");
+#if UNITY_EDITOR
+    UnityEditor.EditorApplication.isPlaying = false;  // Stop play mode in editor
+#else
+    Application.Quit();  // Quit app on device or build
+#endif
+}
+}
