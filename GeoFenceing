@@ -139,7 +139,7 @@ public class GeoFencing : MonoBehaviour
         {
             if (userState.Equals(banned, System.StringComparison.OrdinalIgnoreCase))
             {
-                ShowStatus($"⛔ Access Denied: 52 Cards is restricted in {userState} due to legal guidelines.");
+                ShowStatus($"⛔ Access Denied: This game is restricted in {userState} due to legal guidelines.");
                 yield break;
             }
         }
